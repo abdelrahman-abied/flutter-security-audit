@@ -71,8 +71,13 @@ L="$ROOT/lib"; A="$ROOT/android"; I="$ROOT/ios"
 present_check CRITICAL NET-ACCEPT-ALL MASVS-NETWORK CWE-295 - 'badCertificateCallback[[:space:]]*=.*=>[[:space:]]*true' "$L"
 present_check HIGH     NET-INVALID-OK  MASVS-NETWORK CWE-295 i '(allowInvalidCertificates|allowBadCertificates)' "$L"
 present_check CRITICAL NET-USER-CA     MASVS-NETWORK CWE-295 - 'certificates src="user"' "$A"
-present_check HIGH     NET-CLEARTEXT   MASVS-NETWORK CWE-319 - '(usesCleartextTraffic="true"|NSAllowsArbitraryLoads)' "$A" "$I"
+# Anchor the closing tag: bare "NSAllowsArbitraryLoads" is a substring of the
+# narrower InWebContent/ForMedia keys, which NET-ATS-EXCEPTION reports instead.
+present_check HIGH     NET-CLEARTEXT   MASVS-NETWORK CWE-319 - '(usesCleartextTraffic="true"|NSAllowsArbitraryLoads</key>)' "$A" "$I"
 absent_check  HIGH     NET-NO-PINNING  MASVS-NETWORK CWE-295 'no certificate/public-key pinning found (confirm the app makes HTTPS calls)' i '(setTrustedCertificatesBytes|http_certificate_pinning|ssl_pinning|certificatePin|sha256/)' "$L"
+# iOS: granular ATS exceptions. NSAllowsArbitraryLoads is caught by NET-CLEARTEXT;
+# these are the per-domain holes punched in an otherwise "ATS enabled" app.
+present_check HIGH     NET-ATS-EXCEPTION MASVS-NETWORK CWE-319 - '(NSExceptionAllowsInsecureHTTPLoads|NSAllowsArbitraryLoadsInWebContent|NSAllowsArbitraryLoadsForMedia|NSExceptionMinimumTLSVersion|NSExceptionRequiresForwardSecrecy)' "$I"
 
 # ---- L1 Secrets / reverse engineering ----
 present_check CRITICAL SEC-HARDCODED MASVS-CODE    CWE-798 i '(api[_-]?key|secret|password|passwd|bearer|client[_-]?secret|private[_-]?key)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{6,}' "$L"
@@ -106,6 +111,20 @@ present_check MEDIUM   AUTH-JWT        MASVS-AUTH     CWE-347 i '(JwtDecoder|jwt
 # Dangerous permissions: justify each one, and check the MERGED manifest too.
 present_check LOW      PRV-PERMS       MASVS-PRIVACY  CWE-250 - 'uses-permission[^>]*(READ_CONTACTS|READ_SMS|RECEIVE_SMS|ACCESS_FINE_LOCATION|ACCESS_BACKGROUND_LOCATION|RECORD_AUDIO|READ_CALL_LOG|QUERY_ALL_PACKAGES|READ_EXTERNAL_STORAGE)' "$A"
 absent_check  LOW      PLT-TAPJACK     MASVS-PLATFORM CWE-1021 'filterTouchesWhenObscured not set (tapjacking; mostly mitigated by default on Android 12+)' - 'filterTouchesWhenObscured' "$A"
+
+# ---- iOS platform specifics (twins of the Android checks above) ----
+# Custom URL scheme = the iOS twin of an exported component. ANY app can
+# register the same scheme; only Universal Links are ownership-verified.
+present_check MEDIUM   IPC-URLSCHEME   MASVS-PLATFORM CWE-939 - 'CFBundleURLSchemes' "$I"
+# Debuggable iOS build. NOTE: distribution signing strips this, so it is a
+# finding on dev/ad-hoc/enterprise builds, not on an App Store binary.
+present_check MEDIUM   PLT-TASKALLOW   MASVS-RESILIENCE CWE-489 - 'get-task-allow' "$I"
+# Every usage description is a permission prompt; justify each one.
+present_check LOW      PRV-IOS-PERMS   MASVS-PRIVACY  CWE-250 - 'NS[A-Za-z]+UsageDescription' "$I"
+# Keychain items readable while the device is locked / synced to iCloud.
+present_check MEDIUM   STO-IOS-KEYCHAIN MASVS-STORAGE CWE-522 - '(kSecAttrAccessibleAlways|kSecAttrAccessibleWhenUnlocked[^T])' "$I" "$L"
+# Universal Links = the iOS twin of App Links autoVerify + assetlinks.json.
+absent_check  LOW      PLT-NO-APPLINKS MASVS-PLATFORM CWE-939 'no Associated Domains / applinks entitlement (only relevant if the app handles deep links; custom schemes alone are hijackable)' - '(associated-domains|applinks:)' "$I"
 
 # ---- L6 Server-side trust ----
 absent_check  HIGH     RES-NO-ATTEST   MASVS-RESILIENCE CWE-353 'no server attestation (Play Integrity / App Attest) found — required on money/entitlement paths' i '(play_?integrity|appattest|DCAppAttest|devicecheck|integrityToken)' "$L" "$A" "$I"

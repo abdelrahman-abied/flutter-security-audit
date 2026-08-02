@@ -86,9 +86,9 @@ Rule: since Android 7 apps don't trust user CAs by default — do not opt back i
 **4.3 Cleartext traffic allowed.**
 ```bash
 rg -n 'usesCleartextTraffic="true"' android/
-rg -n "NSAllowsArbitraryLoads" ios/
+rg -n "NSAllowsArbitraryLoads</key>" ios/
 ```
-Rule: no plaintext HTTP for sensitive traffic. → **High**.
+Rule: no plaintext HTTP for sensitive traffic. → **High**. Note the anchored `</key>`: a bare `NSAllowsArbitraryLoads` search also matches the narrower `…InWebContent` / `…ForMedia` keys, which are a *different* (and separately reported) finding — see **4.6**.
 
 **4.4 Certificate pinning present and done right.**
 ```bash
@@ -98,6 +98,12 @@ Rule: pin the **public key (SPKI SHA-256)**, not the full certificate (full-cert
 
 **4.5 Sensitive payloads lack an application-layer envelope.**
 Rule (defense-in-depth for high-risk): consider X25519→HKDF→AES-GCM inside a Dio interceptor so a stripped-TLS proxy still sees only ciphertext. Absent on a high-risk app → **Low/Medium**.
+
+**4.6 iOS: granular ATS exceptions (the hole in an "ATS enabled" app).** `MASVS-NETWORK · CWE-319 (NET-ATS-EXCEPTION)`
+```bash
+rg -n "NSExceptionAllowsInsecureHTTPLoads|NSAllowsArbitraryLoadsInWebContent|NSAllowsArbitraryLoadsForMedia|NSExceptionMinimumTLSVersion|NSExceptionRequiresForwardSecrecy" ios/
+```
+Rule: teams that would never set the blanket `NSAllowsArbitraryLoads` routinely punch **per-domain** holes that are just as exploitable for that domain. Each key disables a specific protection: `NSExceptionAllowsInsecureHTTPLoads` permits plain HTTP; `NSExceptionMinimumTLSVersion` allows TLS 1.0/1.1; `NSExceptionRequiresForwardSecrecy` drops PFS cipher suites; `NSAllowsArbitraryLoadsInWebContent` exempts WKWebView content (pairs badly with L8.1). → **High** for an insecure-HTTP or downgraded-TLS exception on a sensitive domain; **Medium** otherwise.
 
 ---
 
@@ -243,6 +249,40 @@ Rule: every permission must be justifiable in one sentence. Audit the **merged**
 
 ---
 
+### iOS platform specifics — the twins of the Android checks above
+
+**8.13 Custom URL schemes (the iOS twin of an exported component).** `MASVS-PLATFORM · CWE-939 (IPC-URLSCHEME)`
+```bash
+rg -n "CFBundleURLSchemes" -A3 ios/
+```
+Rule: **any app on the device can register the same scheme.** iOS resolves collisions unpredictably, so a `myapp://` link — and anything in its query string — can land in a malicious app. Treat every parameter as untrusted, never put a token in one, and use **Universal Links** for anything that must be ownership-verified. → **Medium** (High if the handler performs a sensitive action).
+
+**8.14 No Universal Links / Associated Domains.** `MASVS-PLATFORM · CWE-939 (PLT-NO-APPLINKS)`
+```bash
+rg -n "associated-domains|applinks:" ios/
+```
+Rule: the iOS twin of `autoVerify` + `assetlinks.json`. Universal Links bind an HTTPS domain to your app via `apple-app-site-association` served over HTTPS from `/.well-known/`. Only relevant if the app handles deep links — but if it handles them via custom schemes *only*, that's the finding. → **Low** (absence-check).
+
+**8.15 Debuggable iOS build.** `MASVS-RESILIENCE · CWE-489 (PLT-TASKALLOW)`
+```bash
+rg -n "get-task-allow" ios/
+```
+Rule: `get-task-allow` lets another process attach to the app's task port — a debugger, or Frida. → **Medium**. **Honest scope:** distribution signing *strips* this entitlement, so an App Store binary can't carry it; this is a finding on **development, ad-hoc and enterprise** builds, which is exactly what gets handed to testers and partners. Verify a real IPA per [MASTG-TEST-0082](https://mas.owasp.org/MASTG/tests/ios/MASVS-RESILIENCE/MASTG-TEST-0082/), not just the repo.
+
+**8.16 iOS permission over-request.** `MASVS-PRIVACY · CWE-250 (PRV-IOS-PERMS)`
+```bash
+rg -n "NS[A-Za-z]+UsageDescription" ios/Runner/Info.plist
+```
+Rule: every `NS*UsageDescription` is a permission you will be asked to justify — by the user at the prompt, and by App Review. Delete the ones no longer used; a stale key from a removed feature still triggers scrutiny. → **Low**.
+
+**8.17 Keychain accessibility set in native code.** `MASVS-STORAGE · CWE-522 (STO-IOS-KEYCHAIN)`
+```bash
+rg -n "kSecAttrAccessibleAlways|kSecAttrAccessibleWhenUnlocked" ios/ lib/
+```
+Rule: the native counterpart to **5.3**, which only sees the Dart `flutter_secure_storage` wrapper. `kSecAttrAccessibleAlways` is deprecated and readable while locked; prefer `…AfterFirstUnlockThisDeviceOnly` or `…WhenUnlockedThisDeviceOnly` — the `ThisDeviceOnly` suffix is what keeps the item out of iCloud Keychain backups. → **Medium**.
+
+---
+
 ## Finding-ID → MASVS / CWE reference
 
 | ID | Severity | MASVS | CWE |
@@ -251,6 +291,7 @@ Rule: every permission must be justifiable in one sentence. Audit the **merged**
 | NET-USER-CA | Critical | NETWORK | CWE-295 |
 | NET-INVALID-OK | High | NETWORK | CWE-295 |
 | NET-CLEARTEXT | High | NETWORK | CWE-319 |
+| NET-ATS-EXCEPTION | High | NETWORK | CWE-319 |
 | NET-NO-PINNING | High* | NETWORK | CWE-295 |
 | SEC-HARDCODED | Critical | CODE | CWE-798 |
 | SEC-CLOUDKEY | Critical | CODE | CWE-798 |
@@ -259,16 +300,21 @@ Rule: every permission must be justifiable in one sentence. Audit the **merged**
 | STO-KEYCHAIN | Medium | STORAGE | CWE-522 |
 | STO-ALLOWBACKUP | Medium | STORAGE | CWE-530 |
 | STO-CLIPBOARD | Low | STORAGE | CWE-200 |
+| STO-IOS-KEYCHAIN | Medium | STORAGE | CWE-522 |
 | PLT-NO-FLAGSEC | Medium* | PLATFORM | CWE-200 |
 | PLT-ISCAPTURED | Low | PLATFORM | CWE-1104 |
 | WEB-JS-CHANNEL | Medium† | PLATFORM | CWE-749 |
 | WEB-FILE-ACCESS | Medium | PLATFORM | CWE-200 |
 | IPC-EXPORTED | Medium | PLATFORM | CWE-926 |
+| IPC-URLSCHEME | Medium | PLATFORM | CWE-939 |
+| PLT-NO-APPLINKS | Low* | PLATFORM | CWE-939 |
 | PLT-DEBUGGABLE | Medium | RESILIENCE | CWE-489 |
+| PLT-TASKALLOW | Medium | RESILIENCE | CWE-489 |
 | PLT-TAPJACK | Low* | PLATFORM | CWE-1021 |
 | CRY-WEAK-RANDOM | Medium | CRYPTO | CWE-330 |
 | PRV-LOG-LEAK | Medium | PRIVACY | CWE-532 |
 | PRV-PERMS | Low | PRIVACY | CWE-250 |
+| PRV-IOS-PERMS | Low | PRIVACY | CWE-250 |
 | COD-SQLI | High | CODE | CWE-89 |
 | AUTH-JWT | Medium† | AUTH | CWE-347 |
 | AUTH-BIOMETRIC | Medium† | AUTH | CWE-287 |

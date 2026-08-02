@@ -5,7 +5,7 @@ description: Audit a Flutter/Dart mobile app for security, hardening, and privac
 
 # Flutter Security Audit
 
-You are acting as a **security engineer and penetration tester for Flutter apps**. Your job is to find where an app fails to defend itself, rank the findings by real-world risk, and give the developer a concrete fix plus a way to *verify* it. This skill distills a six-part hardening methodology into a repeatable audit.
+You are acting as a **security engineer and penetration tester for Flutter apps**. Your job is to find where an app fails to defend itself, rank the findings by real-world risk, and give the developer a concrete fix plus a way to *verify* it. This skill distills a nine-part hardening methodology into a repeatable audit.
 
 ## Rules of engagement (read first)
 
@@ -20,7 +20,7 @@ Work through these phases. Announce the phase, do the work, then move on. Load t
 
 ### Phase 1 — Scope & recon
 1. Confirm what to audit (whole app? a feature? the release pipeline?) and the app's risk tier (a bank/health/auth app warrants Critical gates; a content app is lighter).
-2. Map the project: locate `pubspec.yaml`/`pubspec.lock`, `android/app/build.gradle(.kts)`, `android/app/src/main/AndroidManifest.xml`, `MainActivity.kt`, iOS `Info.plist`, network/Dio setup, storage code, and any CI config (`.github/workflows`, `codemagic.yaml`, `fastlane`).
+2. Map the project: locate `pubspec.yaml`/`pubspec.lock`, `android/app/build.gradle(.kts)`, `android/app/src/main/AndroidManifest.xml`, `MainActivity.kt`, iOS `Info.plist` and `Runner/*.entitlements`, network/Dio setup, storage code, and any CI config (`.github/workflows`, `codemagic.yaml`, `fastlane`).
 
 ### Phase 2 — Static audit (the core pass)
 **Start with the bundled scanner** to sweep every pattern in one pass, then triage:
@@ -35,11 +35,11 @@ It tags each hit with **MASVS + CWE**, honors a `.audit-baseline` (accepted find
 | L1 | **Reverse-engineering resistance** | Missing `--obfuscate`/`--split-debug-info`; **secrets baked into the binary** |
 | L2 | **Runtime self-protection (RASP)** | No root/jailbreak/Frida/emulator detection; one-shot checks; crash-on-detect |
 | L3 | **Screen & data-leak protection** | Missing `FLAG_SECURE`; no background blur; deprecated iOS capture detection |
-| L4 | **Network / transport** | **Accept-all-cert callbacks**, no pinning, user-CA trust, no app-layer encryption |
+| L4 | **Network / transport** | **Accept-all-cert callbacks**, no pinning, user-CA trust, cleartext, **iOS ATS exception domains** |
 | L5 | **Key & data custody** | Secrets in `SharedPreferences`/`.env`/assets; no Keystore/Keychain; `allowBackup` |
 | L6 | **Server-side trust** | No Play Integrity / App Attest; client-side entitlement decisions |
 | L7 | **Supply chain & pipeline** | Vulnerable deps; no obfuscation-in-CI; no perf/leak gates |
-| L8 | **Platform, IPC & injection** | WebView JS bridges/file access; exported components & deep links; tapjacking; weak `Random()`; log/PII leaks; clipboard; `debuggable`; SQLi in `sqflite`/`drift`; unverified JWT claims; over-requested permissions; `local_auth`-only gates; **backend rules & IDOR** |
+| L8 | **Platform, IPC & injection** | WebView JS bridges/file access; exported components & deep links; tapjacking; weak `Random()`; log/PII leaks; clipboard; `debuggable`; SQLi in `sqflite`/`drift`; unverified JWT claims; over-requested permissions; `local_auth`-only gates; **iOS: custom URL schemes, Universal Links, `get-task-allow`, keychain accessibility**; **backend rules & IDOR** |
 
 Do the fast, high-signal scans first (hardcoded secrets, accept-all-cert, missing obfuscation) — these are usually the Critical findings.
 

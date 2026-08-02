@@ -68,23 +68,38 @@ already blocks the PR without SARIF.
 | **L1** | Reverse-engineering resistance | Missing `--obfuscate`/`--split-debug-info`; **secrets baked into the binary** |
 | **L2** | Runtime self-protection (RASP) | No root/jailbreak/Frida/emulator detection; one-shot checks; crash-on-detect |
 | **L3** | Screen & data-leak protection | Missing `FLAG_SECURE`; no background overlay; deprecated iOS capture API |
-| **L4** | Network / transport | **Accept-all-cert callbacks**, no pinning, user-CA trust, cleartext |
+| **L4** | Network / transport | **Accept-all-cert callbacks**, no pinning, user-CA trust, cleartext, **iOS ATS exception domains** |
 | **L5** | Key & data custody | Tokens in `SharedPreferences`; no Keystore/Keychain; `allowBackup` |
 | **L6** | Server-side trust | No Play Integrity / App Attest; client-side entitlement decisions |
 | **L7** | Supply chain & pipeline | Vulnerable deps; no obfuscation in CI; no perf/leak gates |
-| **L8** | Platform, IPC & injection | WebView JS bridges & file access; exported components & deep links; tapjacking; weak `Random()`; log/PII leaks; clipboard; `debuggable`; SQLi; unverified JWT claims; permissions; **backend rules & IDOR** |
+| **L8** | Platform, IPC & injection | WebView JS bridges & file access; exported components & deep links; tapjacking; weak `Random()`; log/PII leaks; clipboard; `debuggable`; SQLi; unverified JWT claims; permissions; **iOS URL schemes, Universal Links, `get-task-allow`, keychain accessibility**; **backend rules & IDOR** |
 
 Every finding is tagged with a MASVS group (`STORAGE · CRYPTO · AUTH · NETWORK ·
 PLATFORM · CODE · RESILIENCE · PRIVACY`) and a CWE id. The full
 finding-ID → MASVS/CWE table is in
 [`references/hardening-checklist.md`](references/hardening-checklist.md).
 
+## Android ↔ iOS parity
+
+Most checks are Dart-level and apply to both platforms. Where a concern is
+platform-specific, both sides are covered:
+
+| Concern | Android | iOS |
+|---|---|---|
+| Cleartext / transport downgrade | `usesCleartextTraffic` | `NSAllowsArbitraryLoads` **+ per-domain `NSExceptionDomains`** |
+| Deep-link entry points | `android:exported`, App Links `autoVerify` | `CFBundleURLSchemes`, Associated Domains / Universal Links |
+| Debuggable build | `android:debuggable` | `get-task-allow` entitlement |
+| Permission over-request | `uses-permission` | `NS*UsageDescription` |
+| Key storage exposure | `allowBackup` | `kSecAttrAccessible*` (native **and** Dart wrapper) |
+| Screen capture | `FLAG_SECURE` | *(no iOS equivalent — detect-and-hide only)* |
+| Tapjacking | `filterTouchesWhenObscured` | *(not applicable)* |
+
 ## What's in the box
 
 | File | Purpose |
 |---|---|
 | `SKILL.md` | Entry point — layers, severity rubric, workflow |
-| `scan.sh` | The scanner (30 checks, baseline, JSON, CI exit code) |
+| `scan.sh` | The scanner (38 checks, baseline, JSON, CI exit code) |
 | `references/hardening-checklist.md` | Per-check pattern, rule, severity + the ID→MASVS/CWE table |
 | `references/attack-playbook.md` | Verification steps with blutter / Frida / Burp / OSV-Scanner |
 | `references/report-format.md` | Report template, posture-grade rubric, CI wiring |
@@ -101,11 +116,13 @@ This is a **static** scanner, and it is deliberately loud rather than clever:
 - **Absence-checks are context-dependent.** "No certificate pinning" is only a
   finding if the app makes sensitive network calls. They don't fail the CI gate
   on their own.
-- **Native coverage is Android-weighted.** Dart-level checks apply to both
-  platforms, but only a few checks read `ios/`. Some of that is inherent —
-  `FLAG_SECURE`, `allowBackup` and `android:exported` have no iOS equivalent —
-  but iOS twins like ATS exception domains and `CFBundleURLTypes` aren't
-  covered yet. PRs welcome.
+- **Some checks are inherently one-platform.** `FLAG_SECURE`, `allowBackup` and
+  `android:exported` have no iOS equivalent, and `get-task-allow` has no Android
+  one. Where a real twin exists, both sides are covered — see the parity table above.
+- **`get-task-allow` is scoped to non-App-Store builds.** Distribution signing
+  strips the entitlement, so that check is meaningful for development, ad-hoc
+  and enterprise builds — precisely the ones handed to testers and partners.
+  Verify a real IPA, not just the repo.
 - **It cannot see your backend**, which is frequently where the real hole is.
   A perfectly hardened client in front of `allow read, write: if true` is still
   fully exploitable. The skill prompts for this; it can't test it.
