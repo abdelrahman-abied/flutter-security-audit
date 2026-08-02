@@ -105,6 +105,8 @@ rg -n "NSExceptionAllowsInsecureHTTPLoads|NSAllowsArbitraryLoadsInWebContent|NSA
 ```
 Rule: teams that would never set the blanket `NSAllowsArbitraryLoads` routinely punch **per-domain** holes that are just as exploitable for that domain. Each key disables a specific protection: `NSExceptionAllowsInsecureHTTPLoads` permits plain HTTP; `NSExceptionMinimumTLSVersion` allows TLS 1.0/1.1; `NSExceptionRequiresForwardSecrecy` drops PFS cipher suites; `NSAllowsArbitraryLoadsInWebContent` exempts WKWebView content (pairs badly with L8.1). → **High** for an insecure-HTTP or downgraded-TLS exception on a sensitive domain; **Medium** otherwise.
 
+**Triage nuance — do not over-rank this against Flutter traffic.** ATS governs `NSURLSession`. Flutter's `dart:io` sockets use **bundled BoringSSL** and are not constrained by ATS, exactly as Android's `network_security_config` doesn't bind them. So an ATS exception is a real finding for **plugins, WebViews and native SDKs**, but it is *not* what protects your Dio/`http` calls — pinning (4.4) is. State which traffic is actually affected instead of implying the app's API calls are downgraded.
+
 ---
 
 ## L5 — Key & data custody (Articles 1–2)
@@ -180,6 +182,10 @@ rg -n "JavascriptChannel|addJavascriptInterface|JavascriptMode\.unrestricted|set
 ```
 Rule: a `JavascriptChannel`/interface reachable from untrusted page content is a native bridge for an attacker. Only enable JS when needed, allow-list the origins/URLs you load, never load attacker-controllable URLs into a channel-enabled WebView. → **High** (untrusted content) / **Medium**.
 
+Note the iOS side is the same finding: `webview_flutter` is `WKWebView` there, and `addJavaScriptChannel` becomes a `WKScriptMessageHandler` callable via `window.webkit.messageHandlers.<name>.postMessage(...)`. One Dart line, two native bridges.
+
+> **Do not accept a `NavigationDelegate` as the fix.** On Android `onNavigationRequest` **does not fire for programmatic `loadRequest()` calls** ([flutter#152168](https://github.com/flutter/flutter/issues/152168)) — verified live: a hostile `loadRequest` produces no delegate verdict at all. The delegate gates *in-page* navigation only, and never gates subresources (`<script src>`, `fetch`) on either platform. So if an external input (deep link, push payload, server response) can influence the URL, the allow-list **must run at the call site, before `loadRequest`**. A codebase that validates only inside the delegate is still vulnerable — flag it.
+
 **8.2 WebView file / universal access.** `MASVS-PLATFORM · CWE-200`
 ```bash
 rg -n "allowFileAccess|allowUniversalAccessFromFileURLs|allowFileAccessFromFileURLs" lib android
@@ -204,12 +210,21 @@ rg -niP "(print|debugPrint|developer\.log|Logger)[^;]*(token|password|secret|jwt
 ```
 Rule: logs land in logcat / crash reports / analytics. Never log credentials, tokens, or PII; strip in release. → **Medium**.
 
+Triage notes that change how you rank and word this:
+- **Correct the usual overstatement.** Another app *cannot* read your logs — `READ_LOGS` has been privileged since Android 4.1. The real exfil routes are **crash/analytics SDK breadcrumbs**, `adb` with USB access, rooted devices, and user-submitted bug reports. Say that, rather than "any app can read logcat."
+- **iOS gives no protection here, contrary to expectation.** `os_log`/`Logger` redact dynamic strings as `<private>` by default — but **Flutter's `print`/`debugPrint` bypass `os_log` entirely** (stdout), so the redaction never applies. Do not downgrade an iOS finding on the assumption that the platform masks it.
+- `print`/`debugPrint` are **not** stripped from release builds; `dart:developer`'s `log()` **is**. Recommending `log()` plus a `kReleaseMode` guard is a concrete fix.
+
 **8.6 Clipboard & unmasked input.** `MASVS-STORAGE · CWE-200`
 ```bash
 rg -n "Clipboard\.setData" lib          # copying secrets to a shared clipboard
 rg -n "TextField\(|TextFormField\(" lib  # then check password fields set obscureText: true
 ```
 Rule: don't auto-copy secrets to the clipboard (other apps read it); password fields need `obscureText: true` and sensible `autofillHints`. → **Low/Medium**.
+
+Platform reality when writing the fix:
+- **Android 13+** can hide a clipboard preview via `ClipDescription.EXTRA_IS_SENSITIVE` — but **Flutter's `Clipboard.setData` cannot set it** ([flutter#105677](https://github.com/flutter/flutter/issues/105677), open since 2022, P3). So a copied password *does* render in the keyboard's clipboard preview. The fix is a platform channel, a plugin like `sensitive_clipboard`, or removing the button — not a Flutter API.
+- **iOS 16+** prompts *"Allow Paste"* when an app **reads** the pasteboard programmatically (16.1 adds a per-app Ask/Deny/Allow setting), suppressed only for deliberate user paste (long-press, ⌘V, `UIPasteControl`). That constrains attackers more than Android's toast — but it protects *reads*, not what your app *writes*. Don't let it lower the severity of writing a secret to the pasteboard.
 
 **8.7 Biometric / local_auth used as the only gate.** `MASVS-AUTH · CWE-287`
 ```bash

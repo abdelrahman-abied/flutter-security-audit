@@ -57,6 +57,35 @@ If cleartext of your requests now appears in Burp → pinning is absent/bypassab
 
 ---
 
+## C2. Prove the SQL injection actually lands (verifies L8.9)
+
+A `rawQuery` with an interpolated variable is a *candidate*. Confirm it by typing a payload into the field that reaches it — but use one that works, because the two obvious payloads usually **fail here and produce a false "we're safe" conclusion**:
+
+```text
+Query under test:
+  SELECT * FROM notes WHERE owner = '$owner' AND title LIKE '%$search%'
+
+❌  ' OR '1'='1        AND binds tighter than OR, so this degrades to
+                      (owner='amy' AND title LIKE '%') OR ('1'='1%')
+                      — the right side is a string comparison that is FALSE.
+                      You get the normal rows back and wrongly assume it's safe.
+
+❌  '; DROP TABLE notes; --
+                      rawQuery executes a SINGLE statement; the second is
+                      never run. Nothing happens — again, a false all-clear.
+
+✅  %' OR 1=1 --       Closes the LIKE pattern, adds an always-true disjunct,
+                      comments out the tail:
+                        … LIKE '%%' OR 1=1 --%'
+                      → collapses to WHERE (…) OR 1=1 = the entire table.
+```
+
+**Report on what an attacker can *read*, not what they can destroy.** The destructive payload fizzling is an accident of the API, not a defence — and it is precisely why this bug survives review. Confirm the fix by re-running the same payload against the parameterized version (`'… LIKE ?', ['%$search%']`), which must return **zero** rows because the payload is bound as a literal value.
+
+Note that placeholders bind **values, not identifiers** — a dynamic `ORDER BY $column` cannot be parameterized and needs a column allow-list.
+
+---
+
 ## D. Scan dependencies — OSV-Scanner (verifies L7.1)
 
 There is **no `dart pub audit`**. Use Google's OSV-Scanner over the lockfile (whole transitive tree):
