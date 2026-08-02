@@ -1,0 +1,124 @@
+# flutter-security-audit
+
+A [Claude Code](https://claude.com/claude-code) skill that audits a Flutter/Dart
+mobile app for security, hardening and privacy gaps, then produces a
+severity-ranked report where **every finding carries a concrete fix and an
+attack-based way to verify it**.
+
+Ships with `scan.sh` — a dependency-free static scanner that bundles all the
+checklist patterns into one pass, tags each hit with **OWASP MASVS + CWE**, and
+exits non-zero on confirmed Critical/High so it works as a CI gate.
+
+---
+
+## Install
+
+Clone into your Claude Code skills directory:
+
+```bash
+# Global (available in every project)
+git clone https://github.com/<you>/flutter-security-audit \
+  ~/.claude/skills/flutter-security-audit
+
+# …or per-project
+git clone https://github.com/<you>/flutter-security-audit \
+  .claude/skills/flutter-security-audit
+```
+
+Then just ask Claude to audit an app — the skill activates on requests like
+*"security-review this Flutter app"*, *"check my pinning setup"*, or
+*"threat-model this before release"*.
+
+## Use the scanner on its own
+
+`scan.sh` is plain bash + grep. No Dart, no Node, no install.
+
+```bash
+./scan.sh /path/to/flutter/app          # human-readable, severity-ranked
+./scan.sh /path/to/flutter/app --json   # machine-readable findings
+```
+
+Exit code is `1` if any Critical/High survives the baseline, else `0`.
+
+**Baseline.** Accepted findings (an intentionally-exported launcher, a demo
+stub) go in `<repo>/.audit-baseline`, one `file:line` substring per line, so
+re-runs stay quiet and the report doesn't cry wolf.
+
+## CI gate
+
+```yaml
+- name: Flutter security scan
+  run: bash path/to/scan.sh . || { echo "::error::confirmed Critical/High finding"; exit 1; }
+
+- name: Machine-readable findings
+  if: always()
+  run: bash path/to/scan.sh . --json > flutter-audit.json
+```
+
+For the GitHub **Security → Code scanning** tab, convert the JSON to SARIF 2.1.0
+and upload with `github/codeql-action/upload-sarif`. The exit-code gate above
+already blocks the PR without SARIF.
+
+---
+
+## What it checks — 8 layers
+
+| Layer | Focus | Representative findings |
+|---|---|---|
+| **L1** | Reverse-engineering resistance | Missing `--obfuscate`/`--split-debug-info`; **secrets baked into the binary** |
+| **L2** | Runtime self-protection (RASP) | No root/jailbreak/Frida/emulator detection; one-shot checks; crash-on-detect |
+| **L3** | Screen & data-leak protection | Missing `FLAG_SECURE`; no background overlay; deprecated iOS capture API |
+| **L4** | Network / transport | **Accept-all-cert callbacks**, no pinning, user-CA trust, cleartext |
+| **L5** | Key & data custody | Tokens in `SharedPreferences`; no Keystore/Keychain; `allowBackup` |
+| **L6** | Server-side trust | No Play Integrity / App Attest; client-side entitlement decisions |
+| **L7** | Supply chain & pipeline | Vulnerable deps; no obfuscation in CI; no perf/leak gates |
+| **L8** | Platform, IPC & injection | WebView JS bridges & file access; exported components & deep links; tapjacking; weak `Random()`; log/PII leaks; clipboard; `debuggable`; SQLi; unverified JWT claims; permissions; **backend rules & IDOR** |
+
+Every finding is tagged with a MASVS group (`STORAGE · CRYPTO · AUTH · NETWORK ·
+PLATFORM · CODE · RESILIENCE · PRIVACY`) and a CWE id. The full
+finding-ID → MASVS/CWE table is in
+[`references/hardening-checklist.md`](references/hardening-checklist.md).
+
+## What's in the box
+
+| File | Purpose |
+|---|---|
+| `SKILL.md` | Entry point — layers, severity rubric, workflow |
+| `scan.sh` | The scanner (30 checks, baseline, JSON, CI exit code) |
+| `references/hardening-checklist.md` | Per-check pattern, rule, severity + the ID→MASVS/CWE table |
+| `references/attack-playbook.md` | Verification steps with blutter / Frida / Burp / OSV-Scanner |
+| `references/report-format.md` | Report template, posture-grade rubric, CI wiring |
+
+---
+
+## Honest limitations
+
+This is a **static** scanner, and it is deliberately loud rather than clever:
+
+- **Patterns find candidates, not findings.** Always open the hit and confirm.
+  The checklist calls out expected false positives — the launcher `MainActivity`
+  is *supposed* to be `exported="true"`.
+- **Absence-checks are context-dependent.** "No certificate pinning" is only a
+  finding if the app makes sensitive network calls. They don't fail the CI gate
+  on their own.
+- **Native coverage is Android-weighted.** Dart-level checks apply to both
+  platforms, but only a few checks read `ios/`. Some of that is inherent —
+  `FLAG_SECURE`, `allowBackup` and `android:exported` have no iOS equivalent —
+  but iOS twins like ATS exception domains and `CFBundleURLTypes` aren't
+  covered yet. PRs welcome.
+- **It cannot see your backend**, which is frequently where the real hole is.
+  A perfectly hardened client in front of `allow read, write: if true` is still
+  fully exploitable. The skill prompts for this; it can't test it.
+
+The framing throughout: **client-side controls raise cost and produce signal;
+the enforced decision lives on your server and in CI.** No report from this tool
+should ever imply an app is "unbreakable."
+
+## Credits
+
+Distilled from the *Flutter Under the Hood: Hardening & High-Speed Architecture*
+article series.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,313 @@
+# Flutter hardening checklist (8 layers)
+
+Each item: **what to check**, a search **pattern** to find the anti-pattern, the **rule**, and the **default severity**. Adjust severity up for high-risk apps (banking, health, auth, wallets).
+
+> **Fastest path:** run `scan.sh <repo>` (in the skill root) — it bundles every pattern below into one pass, tags each hit with MASVS + CWE, honors a `.audit-baseline`, and exits non-zero on confirmed Critical/High (CI gate). `scan.sh <repo> --json` emits machine-readable findings. Then triage the candidates by hand using this file.
+
+> Patterns find *candidates*. Always open the hit and confirm it's real before reporting — note false positives honestly (e.g., the launcher `MainActivity` is *expected* to be `exported="true"`).
+
+**Taxonomy.** Every finding is tagged with an **OWASP MASVS** control group and a **CWE** id:
+`MASVS-STORAGE · CRYPTO · AUTH · NETWORK · PLATFORM · CODE · RESILIENCE · PRIVACY`. A full **finding-ID → MASVS/CWE** table is at the end of this file.
+
+---
+
+## L1 — Reverse-engineering resistance (Article 1)
+
+**1.1 Release builds must be obfuscated + symbol-split.**
+```bash
+rg -n "flutter build (apk|appbundle|ios|ipa)" --glob '!**/build/**' \
+  .github codemagic.yaml Makefile fastlane 2>/dev/null
+```
+Rule: every release build has `--obfuscate --split-debug-info=<dir>`. Missing → **Medium** (High if the app has meaningful client logic). Note: obfuscation is *friction*, not secret-hiding.
+
+**1.2 No secrets baked into the binary (the big one).**
+```bash
+rg -nP "(?i)(api[_-]?key|secret|passwd|password|token|bearer|client[_-]?secret|private[_-]?key)\s*[:=]\s*['\"][^'\"]{6,}" lib
+rg -n "AIza[0-9A-Za-z_\-]{35}" lib            # Google / Firebase
+rg -n "AKIA[0-9A-Z]{16}" lib                  # AWS access key id
+rg -nP "sk_live_[0-9a-zA-Z]{24,}" lib         # Stripe live
+rg -n "ghp_[0-9A-Za-z]{36}" lib               # GitHub token
+rg -n "\.env" pubspec.yaml                     # .env bundled as an asset?
+```
+Rule: **a secret in the binary is not a secret** — `blutter` recovers the object pool (all strings) even with `--obfuscate` (verify in the attack playbook). Proxy third-party keys through your backend; derive/store device keys in Keystore/Keychain. Hardcoded **production** secret → **Critical**.
+
+---
+
+## L2 — Runtime self-protection / RASP (Article 1)
+
+**2.1 Any anti-tamper at all?**
+```bash
+rg -ni "jailbroken|jailbreak|isRealDevice|frida|rooted|SafeDevice|developmentMode" lib
+```
+Rule: a sensitive app should detect root/jailbreak, emulator, debugger, and Frida. Zero hits on a sensitive app → **High**.
+
+**2.2 Crash-on-detect anti-pattern.**
+```bash
+rg -n "exit\(0?\)|SystemNavigator\.pop\(\)" lib
+```
+Rule: don't instantly crash on a signal — it teaches the attacker exactly which check to patch. **Report before you react; degrade, don't detonate.** Instant-crash response → **Medium**.
+
+**2.3 One-shot and Dart-only checks.**
+Rule: detection only in `main()`/`initState` with no re-scan is defeated by attaching after launch — gate the *sensitive action*. Detection reachable purely through a `MethodChannel` is patchable in ~12 lines of Smali; push it into **native C++ via FFI**. Either → **Medium**.
+
+---
+
+## L3 — Screen & data-leak protection (Article 1)
+
+**3.1 Android FLAG_SECURE.**
+```bash
+rg -n "FLAG_SECURE" android/
+```
+Rule: sensitive apps set `window.setFlags(FLAG_SECURE, FLAG_SECURE)` in `MainActivity`. Absent on a sensitive app → **Medium**.
+
+**3.2 iOS capture detection uses the deprecated API.**
+```bash
+rg -n "isCaptured" ios/ lib/
+```
+Rule: `UIScreen.isCaptured` was **deprecated in iOS 18** → use `UITraitCollection.sceneCaptureState`. iOS has **no screenshot block**, only detect-and-hide + a background overlay. Deprecated API → **Low**; no background overlay on a sensitive app → **Medium**.
+
+---
+
+## L4 — Network / transport (Article 2)
+
+**4.1 Accept-all-certificate callback (critical MITM hole).**
+```bash
+rg -nP "badCertificateCallback\s*=\s*\(?.*\)?\s*=>\s*true" lib
+rg -ni "onBadCertificate|allowInvalidCertificates|allowBadCertificates" lib
+```
+Rule: never return `true` from `badCertificateCallback` — it accepts any proxy's cert. → **Critical**.
+
+**4.2 Trusting user-installed CAs (Android).**
+```bash
+rg -n 'certificates src="user"' android/
+```
+Rule: since Android 7 apps don't trust user CAs by default — do not opt back in. → **Critical**.
+
+**4.3 Cleartext traffic allowed.**
+```bash
+rg -n 'usesCleartextTraffic="true"' android/
+rg -n "NSAllowsArbitraryLoads" ios/
+```
+Rule: no plaintext HTTP for sensitive traffic. → **High**.
+
+**4.4 Certificate pinning present and done right.**
+```bash
+rg -ni "setTrustedCertificatesBytes|SecurityContext\(|http_certificate_pinning|ssl_pinning|certificatePin|sha256/" lib
+```
+Rule: pin the **public key (SPKI SHA-256)**, not the full certificate (full-cert pinning bricks the app on renewal). Ship a backup pin. No pinning on a sensitive app → **High**; full-cert pinning → **Medium**.
+
+**4.5 Sensitive payloads lack an application-layer envelope.**
+Rule (defense-in-depth for high-risk): consider X25519→HKDF→AES-GCM inside a Dio interceptor so a stripped-TLS proxy still sees only ciphertext. Absent on a high-risk app → **Low/Medium**.
+
+---
+
+## L5 — Key & data custody (Articles 1–2)
+
+**5.1 Sensitive data in plaintext SharedPreferences.**
+```bash
+rg -ni "shared_preferences|SharedPreferences" lib
+rg -ni "prefs?\.(setString|write).*(token|password|secret|jwt|refresh)" lib
+```
+Rule: tokens/keys belong in `flutter_secure_storage` (Android Keystore / iOS Keychain), not `SharedPreferences`. Token in prefs → **Critical**.
+
+**5.2 Secure storage exists for sensitive data.**
+```bash
+rg -ni "flutter_secure_storage|FlutterSecureStorage" lib
+```
+Rule: absent on an app that stores auth tokens → **High**.
+
+**5.3 iOS keychain accessibility too broad.**
+```bash
+rg -n "KeychainAccessibility\.(unlocked|always|passcode)" lib
+```
+Rule: prefer `first_unlock_this_device` (off iCloud, unavailable while locked). Broad accessibility → **Medium**.
+
+**5.4 Android auto-backup of secure data.**
+```bash
+rg -n "allowBackup" android/app/src/main/AndroidManifest.xml
+```
+Rule: `allowBackup="true"` can sweep tokens into a restorable cloud backup. On a sensitive app → **Medium**.
+
+---
+
+## L6 — Server-side trust / attestation (Article 1)
+
+**6.1 No remote attestation.**
+```bash
+rg -ni "play_?integrity|DCAppAttest|appattest|devicecheck|integrityToken|attestation" lib android ios
+```
+Rule: the only client control an attacker *can't* patch is a hardware-signed verdict your **server** verifies (Play Integrity / App Attest) with a server-issued nonce. Absent on money/entitlement paths → **High**.
+
+**6.2 Client-side entitlement decisions.**
+```bash
+rg -ni "isPremium|isPro|hasSubscription|isEntitled|unlockedFeatures" lib
+```
+Rule: the client should *render* a server decision, not *make* it. A local boolean gating paid features → **High** (trivially flipped with Frida).
+
+---
+
+## L7 — Supply chain & pipeline (Article 6)
+
+**7.1 Vulnerable dependencies** — run OSV-Scanner (see attack playbook). There is **no `dart pub audit`**. Any known-vuln dep → severity per the advisory.
+
+**7.2 No obfuscation gate in CI.**
+```bash
+rg -n "flutter build" .github codemagic.yaml 2>/dev/null
+```
+Rule: CI release builds must include `--obfuscate`. Missing → **Medium**.
+
+**7.3 No perf / leak / golden gates.**
+```bash
+rg -ni "integration_test|leak_tracker|matchesGoldenFile|osv-scanner|dependabot" . 2>/dev/null
+```
+Rule: a hardened app decays without CI gates — perf budgets, `leak_tracker`, golden tests, OSV scan. Absent → **Low/Medium**.
+
+---
+
+## L8 — Platform interaction, IPC & injection (Articles 7–9)
+
+Common Flutter holes outside the "hardening" core. Each tagged with its true MASVS group.
+
+**8.1 WebView exposes native to web content.** `MASVS-PLATFORM · CWE-749`
+```bash
+rg -n "JavascriptChannel|addJavascriptInterface|JavascriptMode\.unrestricted|setJavaScriptEnabled\(true\)" lib
+```
+Rule: a `JavascriptChannel`/interface reachable from untrusted page content is a native bridge for an attacker. Only enable JS when needed, allow-list the origins/URLs you load, never load attacker-controllable URLs into a channel-enabled WebView. → **High** (untrusted content) / **Medium**.
+
+**8.2 WebView file / universal access.** `MASVS-PLATFORM · CWE-200`
+```bash
+rg -n "allowFileAccess|allowUniversalAccessFromFileURLs|allowFileAccessFromFileURLs" lib android
+```
+Rule: file access from a WebView can read local files / bypass same-origin. Disable unless required. → **Medium**.
+
+**8.3 Exported components & deep links.** `MASVS-PLATFORM · CWE-926`
+```bash
+rg -n 'android:exported="true"' android/
+```
+Rule: every exported `activity`/`service`/`receiver` is an entry point. The **launcher `MainActivity` must be exported** (expected — not a finding); flag *other* exported components without permission guards, and validate deep-link / `intent` parameters. For App Links, confirm `android:autoVerify="true"` + the `assetlinks.json` so links can't be hijacked. → **Medium** (High if an exported component performs sensitive actions).
+
+**8.4 Insecure randomness.** `MASVS-CRYPTO · CWE-330`
+```bash
+rg -n "[^a-zA-Z]Random\(" lib   # matches Random(), math.Random(), Random(seed); NOT Random.secure()
+```
+Rule: `Random()` is predictable — never use it for tokens, nonces, IVs, keys, OTPs, or session ids. Use `Random.secure()` (or the `cryptography` package). → **Medium** (High if it seeds a security token).
+
+**8.5 Sensitive data in logs.** `MASVS-PRIVACY · CWE-532`
+```bash
+rg -niP "(print|debugPrint|developer\.log|Logger)[^;]*(token|password|secret|jwt|otp|pin|ssn|card)" lib
+```
+Rule: logs land in logcat / crash reports / analytics. Never log credentials, tokens, or PII; strip in release. → **Medium**.
+
+**8.6 Clipboard & unmasked input.** `MASVS-STORAGE · CWE-200`
+```bash
+rg -n "Clipboard\.setData" lib          # copying secrets to a shared clipboard
+rg -n "TextField\(|TextFormField\(" lib  # then check password fields set obscureText: true
+```
+Rule: don't auto-copy secrets to the clipboard (other apps read it); password fields need `obscureText: true` and sensible `autofillHints`. → **Low/Medium**.
+
+**8.7 Biometric / local_auth used as the only gate.** `MASVS-AUTH · CWE-287`
+```bash
+rg -n "local_auth|authenticate\(" lib
+```
+Rule: `local_auth` is a *local UX* check — `authenticate()` returns a `Future<bool>` computed on the attacker's device, so it's patchable and it produces **no evidence your server can verify**. Never let it be the sole authorization for sensitive actions; the server must still enforce auth (tie to L6). The real mechanism for money paths is a Keystore/Secure Enclave key created with `setUserAuthenticationRequired(true)` (iOS: `.biometryCurrentSet`) that **signs a server-issued nonce** — requires native code; no Flutter package does it end-to-end. → **High** if it gates money/data with no server check.
+
+Also flag the **outdated API**: `local_auth` 3.0.0 removed `AuthenticationOptions` from `authenticate()` (`stickyAuth` → `persistAcrossBackgrounding`, `useErrorDialogs` dropped) and now throws `LocalAuthException` instead of `PlatformException`. Code using `options: AuthenticationOptions(...)` does not compile against current `local_auth` → **Low** (`COD-DEPRECATED`).
+
+**8.8 The real hole is often the backend (not greppable).** `MASVS-RESILIENCE · CWE-639 (RES-BACKEND)`
+Rule: a perfectly hardened client in front of **wide-open Firestore/RTDB/Storage rules** or an API with no server-side authorization is still fully exploitable. Always remind the developer to audit **backend security rules and server authz**, not just the app. Grep any rules files for `if true` and for `request.auth != null` used as if it meant *ownership* — it does not; it means "any signed-up user." Replay a real API call with `curl` and change one object id (IDOR). → context-dependent, often **Critical**.
+
+**8.9 SQL injection in `sqflite` / `drift`.** `MASVS-CODE · CWE-89`
+```bash
+rg -nP '(rawQuery|rawInsert|rawUpdate|rawDelete|customSelect|customStatement|execute)\(.*\$' lib
+```
+Rule: never interpolate into SQL. Use `?` placeholders with an args list (`db.rawQuery('… WHERE t LIKE ?', [v])`, `db.query(..., whereArgs: [...])`, drift's `variables:`). Note placeholders bind **values, not identifiers** — a dynamic `ORDER BY $col` needs a column allow-list. → **High**.
+
+**8.10 JWT decoded client-side and trusted.** `MASVS-AUTH · CWE-347`
+```bash
+rg -nP '(JwtDecoder|jwt_decoder|decodeJwt|parseJwt)' lib
+```
+Rule: **decoding is not verifying.** Reading `exp` to refresh proactively is fine; reading `role`/`isPremium` to unlock anything is the client-side entitlement bug (see 6.2). Server-side, the verifier must pin the algorithm — never read `alg` from the token header (`alg:none` and RS256→HS256 confusion). → **Medium** (High if a claim gates a paid or privileged feature).
+
+**8.11 Tapjacking / touch filtering.** `MASVS-PLATFORM · CWE-1021`
+```bash
+rg -n "filterTouchesWhenObscured" android/
+```
+Rule: set `window.decorView.filterTouchesWhenObscured = true` in `MainActivity` for sensitive confirmation screens (Flutter has no Dart-side API — flutter#40422 is open). Honest severity: Android 12+ **already blocks full occlusion from other UIDs by default**, and the flag does not stop *partial* occlusion or accessibility abuse. → **Low**.
+
+**8.12 Permission over-request.** `MASVS-PRIVACY · CWE-250`
+```bash
+rg -n "uses-permission" android/app/src/main/AndroidManifest.xml
+aapt dump permissions app-release.apk     # the MERGED set — dependencies add their own
+```
+Rule: every permission must be justifiable in one sentence. Audit the **merged** manifest, since transitive dependencies inject permissions; strip unwanted ones with `tools:node="remove"`. → **Low**.
+
+---
+
+## Finding-ID → MASVS / CWE reference
+
+| ID | Severity | MASVS | CWE |
+|---|---|---|---|
+| NET-ACCEPT-ALL | Critical | NETWORK | CWE-295 |
+| NET-USER-CA | Critical | NETWORK | CWE-295 |
+| NET-INVALID-OK | High | NETWORK | CWE-295 |
+| NET-CLEARTEXT | High | NETWORK | CWE-319 |
+| NET-NO-PINNING | High* | NETWORK | CWE-295 |
+| SEC-HARDCODED | Critical | CODE | CWE-798 |
+| SEC-CLOUDKEY | Critical | CODE | CWE-798 |
+| STO-TOKEN-PREFS | High | STORAGE | CWE-312 |
+| STO-NO-SECURE | High* | STORAGE | CWE-312 |
+| STO-KEYCHAIN | Medium | STORAGE | CWE-522 |
+| STO-ALLOWBACKUP | Medium | STORAGE | CWE-530 |
+| STO-CLIPBOARD | Low | STORAGE | CWE-200 |
+| PLT-NO-FLAGSEC | Medium* | PLATFORM | CWE-200 |
+| PLT-ISCAPTURED | Low | PLATFORM | CWE-1104 |
+| WEB-JS-CHANNEL | Medium† | PLATFORM | CWE-749 |
+| WEB-FILE-ACCESS | Medium | PLATFORM | CWE-200 |
+| IPC-EXPORTED | Medium | PLATFORM | CWE-926 |
+| PLT-DEBUGGABLE | Medium | RESILIENCE | CWE-489 |
+| PLT-TAPJACK | Low* | PLATFORM | CWE-1021 |
+| CRY-WEAK-RANDOM | Medium | CRYPTO | CWE-330 |
+| PRV-LOG-LEAK | Medium | PRIVACY | CWE-532 |
+| PRV-PERMS | Low | PRIVACY | CWE-250 |
+| COD-SQLI | High | CODE | CWE-89 |
+| AUTH-JWT | Medium† | AUTH | CWE-347 |
+| AUTH-BIOMETRIC | Medium† | AUTH | CWE-287 |
+| RES-BACKEND | Critical† | RESILIENCE | CWE-639 |
+| RES-NO-ATTEST | High* | RESILIENCE | CWE-353 |
+| RES-CLIENT-ENT | Medium† | RESILIENCE | CWE-602 |
+| RES-NO-RASP | Medium* | RESILIENCE | CWE-919 |
+| COD-DEBUG-PRINT | Low | CODE | CWE-489 |
+| COD-DEPRECATED | Low | CODE | CWE-477 |
+
+\* = absence-check (a *missing* control); context-dependent, does not fail the CI gate on its own.
+† = heuristic pattern; the scanner emits this **candidate** severity (Medium, won't fail the gate), but the *confirmed* severity is often **High** per the checklist prose — escalate when you verify it's a real sole-gate / client-side-decision.
+
+---
+
+## Developer guard: performance & memory (Articles 3–5)
+
+Not "security" but the same "self-defense" mindset; report as **Low/Medium** hygiene.
+
+**G.1 Undisposed controllers → leaks.**
+```bash
+rg -n "AnimationController\(|TextEditingController\(|ScrollController\(|PageController\(|Timer\.periodic\(|\.listen\(" lib
+```
+Rule: every controller/subscription/timer/listener needs a matching `dispose`/`cancel`/`removeListener`. Flag any `State` with one of these but no `dispose()` override. Enforce with `leak_tracker` in CI.
+
+**G.2 Offscreen-pass / deprecated paint APIs.**
+```bash
+rg -n "Opacity\(|saveLayer\(|withOpacity\(|antiAliasWithSaveLayer|BackdropFilter\(" lib
+```
+Rule: `withOpacity` is deprecated → `withValues(alpha:)`; `Opacity`/`saveLayer`/blurs force offscreen passes (raster jank) — Impeller did **not** make these free.
+
+**G.3 Full-resolution image decode.**
+```bash
+rg -n "Image\.(network|asset|file)\(" lib
+```
+Rule: in lists/thumbnails, pass `cacheWidth`/`memCacheWidth` — decoded RAM is `w×h×4`, independent of file size. Missing on image-heavy screens → **Medium** (OOM risk).
+
+**G.4 Heavy work on the UI isolate.**
+```bash
+rg -n "jsonDecode\(|utf8\.decode\(|\.map\(.*fromJson" lib
+```
+Rule: large parses/CPU work belong on an isolate (`Isolate.run`/`compute`, or a worker pool); big buffers move with `TransferableTypedData`. Heavy sync parse on main → **Low/Medium** (jank).
