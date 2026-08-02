@@ -17,11 +17,11 @@ Clone into your Claude Code skills directory:
 
 ```bash
 # Global (available in every project)
-git clone https://github.com/<you>/flutter-security-audit \
+git clone https://github.com/abdelrahman-abied/flutter-security-audit \
   ~/.claude/skills/flutter-security-audit
 
 # …or per-project
-git clone https://github.com/<you>/flutter-security-audit \
+git clone https://github.com/abdelrahman-abied/flutter-security-audit \
   .claude/skills/flutter-security-audit
 ```
 
