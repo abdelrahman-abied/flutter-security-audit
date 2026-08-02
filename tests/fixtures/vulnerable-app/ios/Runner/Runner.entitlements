@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>get-task-allow</key>
+	<true/>
+
+	<!--
+	  Universal Links are the only ownership-verified deep-link entry point, and
+	  this app does not claim any. PLT-NO-APPLINKS must fire even though the
+	  entitlement name appears below inside a comment.
+	  <key>com.apple.developer.associated-domains</key>                 EXPECT-MISS
+	  <array><string>applinks:example.com</string></array>              EXPECT-MISS
+	-->
+</dict>
+</plist>

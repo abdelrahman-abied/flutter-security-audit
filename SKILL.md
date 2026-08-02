@@ -28,7 +28,7 @@ Work through these phases. Announce the phase, do the work, then move on. Load t
 bash ~/.claude/skills/flutter-security-audit/scan.sh <repo>            # human output, exits 1 on confirmed Critical/High
 bash ~/.claude/skills/flutter-security-audit/scan.sh <repo> --json     # machine-readable (CI / GitHub code scanning)
 ```
-It tags each hit with **MASVS + CWE**, honors a `.audit-baseline` (accepted findings), and runs absence-checks for missing controls. Then work the checklist in **`references/hardening-checklist.md`** — eight layers, each with the pattern, rule, and severity — to confirm candidates and catch what patterns can't (logic, context). The eight layers:
+It tags each hit with **MASVS + CWE**, honors a `.audit-baseline` (accepted findings), and runs absence-checks for missing controls. Matches inside comments are dropped — a line that only *talks* about `Random()` is not a finding, and a control that exists only in a commented-out line does not satisfy an absence-check — but string literals still count as code, so expect an occasional sentence about a secret to be reported alongside real ones. Then work the checklist in **`references/hardening-checklist.md`** — eight layers, each with the pattern, rule, and severity — to confirm candidates and catch what patterns can't (logic, context). The eight layers:
 
 | # | Layer | Looks for |
 |---|---|---|
@@ -72,7 +72,7 @@ Always state **why** a finding got its severity, and note when a Medium becomes 
 - Be honest about **false positives** and **residual risk** — a control that's bypassable should say so.
 
 ## Reference files
-- `scan.sh` — one-shot static scanner: `scan.sh <repo> [--json]`. Bundles all patterns, tags MASVS/CWE, honors `.audit-baseline`, exits non-zero on confirmed Critical/High (CI gate).
+- `scan.sh` — one-shot static scanner: `scan.sh <repo> [--json]`. Bundles all 36 patterns, tags MASVS/CWE, honors `.audit-baseline`, skips comment-only matches, exits non-zero on confirmed Critical/High (CI gate).
 - `references/hardening-checklist.md` — the eight-layer checklist with search patterns, the rule for each, and the finding-ID → MASVS/CWE table.
 - `references/attack-playbook.md` — offensive verification commands (blutter, Frida, Burp, OSV-Scanner, apk analysis).
 - `references/report-format.md` — the findings-report template (posture grade, MASVS coverage) and a worked example.

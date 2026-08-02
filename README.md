@@ -31,7 +31,7 @@ Then just ask Claude to audit an app — the skill activates on requests like
 
 ## Use the scanner on its own
 
-`scan.sh` is plain bash + grep. No Dart, no Node, no install.
+`scan.sh` is plain bash, grep and awk. No Dart, no Node, no install.
 
 ```bash
 ./scan.sh /path/to/flutter/app          # human-readable, severity-ranked
@@ -39,6 +39,23 @@ Then just ask Claude to audit an app — the skill activates on requests like
 ```
 
 Exit code is `1` if any Critical/High survives the baseline, else `0`.
+
+**It does not report comments.** A pattern that matches only a comment is prose
+*about* a vulnerability, not a vulnerability — and on a real app that was 30% of
+the output. Each hit is re-tested against the code part of its line, so
+
+```dart
+final token = Random();          // ← reported: weak PRNG
+// never mint a token with Random()   ← not reported: it is a note
+```
+
+behave differently. Trailing comments, `/* … */` and `<!-- … -->` blocks spanning
+several lines, and `//` inside a string (`'https://…'`) are all handled. The
+same rule applies to the absence-checks: a dependency or a `FLAG_SECURE` call
+that exists only in a commented-out line does not count as a control.
+
+String literals *are* code, deliberately: the scanner cannot tell a hardcoded
+secret from a sentence about one, so it reports both and you confirm.
 
 **Baseline.** Accepted findings (an intentionally-exported launcher, a demo
 stub) go in `<repo>/.audit-baseline`, one `file:line` substring per line, so
@@ -99,10 +116,26 @@ platform-specific, both sides are covered:
 | File | Purpose |
 |---|---|
 | `SKILL.md` | Entry point — layers, severity rubric, workflow |
-| `scan.sh` | The scanner (38 checks, baseline, JSON, CI exit code) |
+| `scan.sh` | The scanner (36 checks, baseline, JSON, CI exit code) |
 | `references/hardening-checklist.md` | Per-check pattern, rule, severity + the ID→MASVS/CWE table |
 | `references/attack-playbook.md` | Verification steps with blutter / Frida / Burp / OSV-Scanner |
 | `references/report-format.md` | Report template, posture-grade rubric, CI wiring |
+| `tests/` | Fixture-based regression suite — see [`tests/README.md`](tests/README.md) |
+
+## Tests
+
+```bash
+bash tests/test.sh
+```
+
+Two fixture apps, asserted in both directions: `vulnerable-app` must trip every
+one of the 36 checks, `clean-app` must trip none. A check that never fires and a
+check that always fires are both broken, and only the pair catches both. The
+comment rules are asserted line by line from `EXPECT-HIT` / `EXPECT-MISS`
+markers that live in the fixtures, alongside the exit-code gate, `--json`
+validity and `.audit-baseline` suppression. CI runs it on Ubuntu and macOS,
+because GNU and BSD grep, and mawk and the one-true-awk, are where this kind of
+tool actually breaks.
 
 ---
 

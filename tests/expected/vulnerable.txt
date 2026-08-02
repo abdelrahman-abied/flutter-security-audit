@@ -1,0 +1,47 @@
+# Finding IDs that fixtures/vulnerable-app must produce — every check in
+# scan.sh, in both directions:
+#   * a check missing from this list is a check no fixture exercises
+#   * an ID here that stops firing is a check that silently broke
+# test.sh asserts this list equals both the IDs declared in scan.sh and the IDs
+# actually reported. Adding a check means adding bait to the fixture and a line
+# here; the suite fails until you do.
+#
+# RES-BACKEND is deliberately absent: it is a manual-only finding (‡), never
+# emitted by the scanner.
+
+AUTH-BIOMETRIC
+AUTH-JWT
+COD-DEBUG-PRINT
+COD-DEPRECATED
+COD-SQLI
+CRY-WEAK-RANDOM
+IPC-EXPORTED
+IPC-URLSCHEME
+NET-ACCEPT-ALL
+NET-ATS-EXCEPTION
+NET-CLEARTEXT
+NET-INVALID-OK
+NET-NO-PINNING
+NET-USER-CA
+PLT-DEBUGGABLE
+PLT-ISCAPTURED
+PLT-NO-APPLINKS
+PLT-NO-FLAGSEC
+PLT-TAPJACK
+PLT-TASKALLOW
+PRV-IOS-PERMS
+PRV-LOG-LEAK
+PRV-PERMS
+RES-CLIENT-ENT
+RES-NO-ATTEST
+RES-NO-RASP
+SEC-CLOUDKEY
+SEC-HARDCODED
+STO-ALLOWBACKUP
+STO-CLIPBOARD
+STO-IOS-KEYCHAIN
+STO-KEYCHAIN
+STO-NO-SECURE
+STO-TOKEN-PREFS
+WEB-FILE-ACCESS
+WEB-JS-CHANNEL

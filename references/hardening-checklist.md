@@ -178,7 +178,10 @@ Common Flutter holes outside the "hardening" core. Each tagged with its true MAS
 
 **8.1 WebView exposes native to web content.** `MASVS-PLATFORM · CWE-749`
 ```bash
-rg -n "JavascriptChannel|addJavascriptInterface|JavascriptMode\.unrestricted|setJavaScriptEnabled\(true\)" lib
+# -i is not optional: webview_flutter 3.x spelled it Javascript*, 4.x spells it
+# JavaScript* (addJavaScriptChannel, JavaScriptMode). A case-sensitive pattern
+# silently misses every app on the current plugin.
+rg -ni "javascriptchannel|addjavascriptinterface|javascriptmode\.unrestricted|setjavascriptenabled\(true\)" lib
 ```
 Rule: a `JavascriptChannel`/interface reachable from untrusted page content is a native bridge for an attacker. Only enable JS when needed, allow-list the origins/URLs you load, never load attacker-controllable URLs into a channel-enabled WebView. → **High** (untrusted content) / **Medium**.
 
@@ -188,9 +191,13 @@ Note the iOS side is the same finding: `webview_flutter` is `WKWebView` there, a
 
 **8.2 WebView file / universal access.** `MASVS-PLATFORM · CWE-200`
 ```bash
-rg -n "allowFileAccess|allowUniversalAccessFromFileURLs|allowFileAccessFromFileURLs" lib android
+# -i catches the setter form too: Kotlin reads settings.allowFileAccess, the
+# Dart/platform-channel side setAllowFileAccess().
+rg -ni "allowfileaccess|allowuniversalaccessfromfileurls" lib android
 ```
 Rule: file access from a WebView can read local files / bypass same-origin. Disable unless required. → **Medium**.
+
+Expect this one to fire on the fix as well as the bug: a line that explicitly sets `allowFileAccess = false` matches the same pattern. That is deliberate — below API 30 the default is `true`, so the *absence* of any mention is also a finding, and the check cannot tell the two apart. Confirm the value, then baseline the line.
 
 **8.3 Exported components & deep links.** `MASVS-PLATFORM · CWE-926`
 ```bash
@@ -292,6 +299,9 @@ Rule: every `NS*UsageDescription` is a permission you will be asked to justify �
 
 **8.17 Keychain accessibility set in native code.** `MASVS-STORAGE · CWE-522 (STO-IOS-KEYCHAIN)`
 ```bash
+# scan.sh anchors the second term as kSecAttrAccessibleWhenUnlocked[^T] so the
+# safe …WhenUnlockedThisDeviceOnly does not report. This grep is the loud
+# version: it shows both, and you read the suffix.
 rg -n "kSecAttrAccessibleAlways|kSecAttrAccessibleWhenUnlocked" ios/ lib/
 ```
 Rule: the native counterpart to **5.3**, which only sees the Dart `flutter_secure_storage` wrapper. `kSecAttrAccessibleAlways` is deprecated and readable while locked; prefer `…AfterFirstUnlockThisDeviceOnly` or `…WhenUnlockedThisDeviceOnly` — the `ThisDeviceOnly` suffix is what keeps the item out of iCloud Keychain backups. → **Medium**.

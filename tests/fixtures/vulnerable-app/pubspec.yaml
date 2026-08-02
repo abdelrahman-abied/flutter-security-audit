@@ -1,0 +1,19 @@
+name: vulnerable_fixture
+description: Fixture app. Every greppable check in scan.sh must fire against it.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  shared_preferences: ^2.3.2
+  # A commented-out dependency is not a control. STO-NO-SECURE must still fire.
+  # flutter_secure_storage: ^9.2.2                      EXPECT-MISS
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

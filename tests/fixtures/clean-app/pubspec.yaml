@@ -1,0 +1,19 @@
+name: clean_fixture
+description: Fixture app. The hardened twin of vulnerable-app; must score zero.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.2
+  flutter_jailbreak_detection: ^1.10.0
+  http: ^1.2.0
+  sqflite: ^2.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

@@ -26,8 +26,127 @@ TSV="$(mktemp)"
 trap 'rm -f "$TSV"' EXIT
 
 GBASE="-rHnEI --exclude-dir=build --exclude-dir=.dart_tool --exclude-dir=.git --exclude-dir=Pods"
+TAB="$(printf '\t')"
 
 rank_of() { case "$1" in CRITICAL) echo 0;; HIGH) echo 1;; MEDIUM) echo 2;; LOW) echo 3;; *) echo 4;; esac; }
+
+# ---- comment awareness ----------------------------------------------------
+# A pattern that only matches a comment is noise, not a finding: on a real app
+# 30% of this scanner's hits were prose *about* the vulnerability. Rather than
+# dropping any line that contains a comment (which would lose the very common
+# `foo(Random());  // note`), each hit is re-tested against the CODE part of
+# the line alone. awk is already required by the exit gate — no new dependency.
+#
+# strip_comments: stdin = grep output "file:line:content"
+#                 stdout = "file<TAB>line<TAB>code-only<TAB>original"
+# Lines whose code part is blank (the whole line was a comment) are dropped
+# here. Comment syntax is chosen per file type, quotes are honoured so that
+# "https://x" and '#tag' survive, and /* */ and <!-- --> blocks are tracked
+# across lines by re-reading the source — which grep's matching-lines-only
+# output cannot show. Unreadable file => fail open, the hit is kept.
+strip_comments() {
+  awk '
+  BEGIN { SQ = sprintf("%c", 39); DQ = "\"" }
+  function style(f) {
+    if (f ~ /\.(xml|plist|entitlements|storyboard|xib|html|htm)$/) return "x"
+    if (f ~ /\.(yaml|yml|properties|cfg|conf|sh|bash|rb|toml)$/)   return "h"
+    if (f ~ /(^|\/)(Podfile|Fastfile|Gemfile|Makefile)$/)          return "h"
+    return "c"
+  }
+  function load(f, maxln,   st, nr, l, inb, ins, esc, i, n, ch, nx, out, lead, fast) {
+    DONE[f] = 1
+    st = style(f); nr = 0; inb = 0
+    while (nr < maxln && (getline l < f) > 0) {
+      nr++
+      fast = 0
+      if (!inb) {
+        if (st == "c")      fast = (index(l, "//") == 0 && index(l, "/*") == 0)
+        else if (st == "x") fast = (index(l, "<!--") == 0)
+        else                fast = (index(l, "#") == 0)
+      }
+      if (fast) out = l
+      else {
+        out = ""; ins = ""; esc = 0; n = length(l)
+        for (i = 1; i <= n; i++) {
+          ch = substr(l, i, 1); nx = substr(l, i + 1, 1)
+          if (inb) {                                   # inside /* */ or <!-- -->
+            if (st == "c") { if (ch == "*" && nx == "/")                             { inb = 0; i++ } }
+            else           { if (ch == "-" && nx == "-" && substr(l, i+2, 1) == ">") { inb = 0; i += 2 } }
+            continue
+          }
+          if (ins != "") {                             # inside a string literal
+            out = out ch
+            if (esc) esc = 0
+            else if (ch == "\\") esc = 1
+            else if (ch == ins)  ins = ""
+            continue
+          }
+          if (st == "c") {
+            if (ch == "/" && nx == "/") break
+            if (ch == "/" && nx == "*") { inb = 1; i++; continue }
+            if (ch == DQ || ch == SQ) ins = ch
+          } else if (st == "x") {
+            if (ch == "<" && substr(l, i, 4) == "<!--") { inb = 1; i += 3; continue }
+          } else {
+            # YAML: # starts a comment only at line start or after whitespace,
+            # so http://host#frag keeps its tail.
+            if (ch == "#" && (i == 1 || substr(l, i-1, 1) == " " || substr(l, i-1, 1) == "\t")) break
+            if (ch == DQ || ch == SQ) ins = ch
+          }
+          out = out ch
+        }
+      }
+      lead = l; sub(/^[ \t]+/, "", lead)
+      if (lead ~ /^(\/\/|\/\*|\*|#|<!--)/) out = ""    # whole-line comment
+      CODE[f, nr] = out
+    }
+    close(f)
+  }
+  { RAW[++N] = $0 }
+  END {
+    for (k = 1; k <= N; k++) {                         # pass 1: last line needed per file
+      i = index(RAW[k], ":"); if (!i) continue
+      f = substr(RAW[k], 1, i-1); r = substr(RAW[k], i+1)
+      j = index(r, ":"); if (!j) continue
+      s = substr(r, 1, j-1); if (s !~ /^[0-9]+$/) continue
+      if (s + 0 > MAX[f]) MAX[f] = s + 0
+    }
+    for (k = 1; k <= N; k++) {
+      i = index(RAW[k], ":"); if (!i) continue
+      f = substr(RAW[k], 1, i-1); r = substr(RAW[k], i+1)
+      j = index(r, ":"); if (!j) continue
+      s = substr(r, 1, j-1); orig = substr(r, j+1)
+      code = orig
+      if (s ~ /^[0-9]+$/) {
+        if (!(f in DONE)) load(f, MAX[f])
+        if ((f SUBSEP (s+0)) in CODE) code = CODE[f, s+0]
+      }
+      if (code ~ /^[ \t]*$/) continue                  # the line was all comment
+      gsub(/\t/, " ", code)
+      print f "\t" s "\t" code "\t" orig
+    }
+  }'
+}
+
+# Re-test one line against the check pattern. Same ERE engine family as grep -E.
+matches() { # code pattern casefold
+  local rc=1
+  [ "$3" = "i" ] && shopt -s nocasematch
+  [[ $1 =~ $2 ]] && rc=0
+  shopt -u nocasematch
+  return $rc
+}
+
+# The one grep entry point: emits "file:line<TAB>original" for real code hits.
+hits() { # casefold pattern paths...
+  local ci="$1" pat="$2"; shift 2
+  local gf="$GBASE"; [ "$ci" = "i" ] && gf="$gf -i"
+  # shellcheck disable=SC2086
+  grep $gf "$pat" "$@" 2>/dev/null | strip_comments |
+    while IFS="$TAB" read -r f ln code orig; do
+      matches "$code" "$pat" "$ci" && printf '%s:%s\t%s\n' "$f" "$ln" "$orig"
+    done
+}
 
 suppressed() { # $1 = "file:line"
   [ -f "$BASELINE" ] || return 1
@@ -37,7 +156,11 @@ suppressed() { # $1 = "file:line"
 record() { # sev id masvs cwe location snippet
   local sev="$1" id="$2" masvs="$3" cwe="$4" loc="$5" snip="$6"
   suppressed "$loc" && return 0
-  snip="$(printf '%s' "$snip" | tr '\t' ' ' | sed 's/^[[:space:]]*//' | cut -c1-160)"
+  # Bash string ops, not tr|sed|cut: four processes per finding is most of the
+  # runtime on a large repo, and this runs once per hit.
+  snip="${snip//$TAB/ }"                        # tabs to spaces
+  snip="${snip#"${snip%%[![:space:]]*}"}"       # strip leading whitespace
+  snip="${snip:0:160}"                          # keep the line one line
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(rank_of "$sev")" "$sev" "$id" "$masvs" "$cwe" "$loc" "$snip" >> "$TSV"
 }
 
@@ -45,22 +168,19 @@ record() { # sev id masvs cwe location snippet
 present_check() {
   local sev="$1" id="$2" masvs="$3" cwe="$4" ci="$5" pat="$6"; shift 6
   local paths=("$@"); [ ${#paths[@]} -eq 0 ] && paths=("$ROOT/lib")
-  local gf="$GBASE"; [ "$ci" = "i" ] && gf="$gf -i"
-  # shellcheck disable=SC2086
-  grep $gf "$pat" "${paths[@]}" 2>/dev/null | while IFS= read -r line; do
-    local loc="${line%%:*}"; local rest="${line#*:}"; local ln="${rest%%:*}"
-    record "$sev" "$id" "$masvs" "$cwe" "$loc:$ln" "${line#*:*:}"
+  hits "$ci" "$pat" "${paths[@]}" | while IFS="$TAB" read -r loc snip; do
+    record "$sev" "$id" "$masvs" "$cwe" "$loc" "$snip"
   done
 }
 
 # absent_check: NO match is a finding (a control appears to be missing).
+# A control named only in a comment does not count as present, so this uses the
+# same comment filter — a commented-out dependency must not silence the check.
 # args: sev id masvs cwe note case pattern [paths...]
 absent_check() {
   local sev="$1" id="$2" masvs="$3" cwe="$4" note="$5" ci="$6" pat="$7"; shift 7
   local paths=("$@"); [ ${#paths[@]} -eq 0 ] && paths=("$ROOT")
-  local gf="$GBASE"; [ "$ci" = "i" ] && gf="$gf -i"
-  # shellcheck disable=SC2086
-  if ! grep $gf -q "$pat" "${paths[@]}" 2>/dev/null; then
+  if [ -z "$(hits "$ci" "$pat" "${paths[@]}" | head -n 1)" ]; then
     record "$sev" "$id" "$masvs" "$cwe" "(project-wide)" "MISSING: $note"
   fi
 }
@@ -96,8 +216,13 @@ absent_check  MEDIUM   PLT-NO-FLAGSEC  MASVS-PLATFORM CWE-200 'FLAG_SECURE not s
 present_check LOW      PLT-ISCAPTURED  MASVS-PLATFORM CWE-1104 - 'isCaptured' "$I" "$L"
 
 # ---- NEW: Platform interaction, IPC & injection ----
-present_check MEDIUM   WEB-JS-CHANNEL  MASVS-PLATFORM CWE-749 - '(JavascriptChannel|addJavascriptInterface|JavascriptMode\.unrestricted|setJavaScriptEnabled\(true\))' "$L"
-present_check MEDIUM   WEB-FILE-ACCESS MASVS-PLATFORM CWE-200 - '(allowFileAccess|allowUniversalAccessFromFileURLs)' "$L" "$A"
+# Case-insensitive on purpose: webview_flutter 3.x spelled it JavascriptChannel /
+# JavascriptMode, 4.x spells it addJavaScriptChannel / JavaScriptMode. A
+# case-sensitive pattern silently misses every app on the current plugin.
+present_check MEDIUM   WEB-JS-CHANNEL  MASVS-PLATFORM CWE-749 i '(javascriptchannel|addjavascriptinterface|javascriptmode\.unrestricted|setjavascriptenabled\(true\))' "$L"
+# Case-insensitive so the setter form is caught too: the Kotlin/Java side reads
+# settings.allowFileAccess, the Dart and platform-channel side setAllowFileAccess().
+present_check MEDIUM   WEB-FILE-ACCESS MASVS-PLATFORM CWE-200 i '(allowfileaccess|allowuniversalaccessfromfileurls)' "$L" "$A"
 present_check MEDIUM   IPC-EXPORTED    MASVS-PLATFORM CWE-926 - 'android:exported="true"' "$A"
 present_check MEDIUM   PLT-DEBUGGABLE  MASVS-RESILIENCE CWE-489 - 'android:debuggable="true"' "$A"
 present_check MEDIUM   CRY-WEAK-RANDOM MASVS-CRYPTO   CWE-330 - '[^a-zA-Z]Random\(' "$L"
