@@ -183,7 +183,7 @@ Common Flutter holes outside the "hardening" core. Each tagged with its true MAS
 # silently misses every app on the current plugin.
 rg -ni "javascriptchannel|addjavascriptinterface|javascriptmode\.unrestricted|setjavascriptenabled\(true\)" lib
 ```
-Rule: a `JavascriptChannel`/interface reachable from untrusted page content is a native bridge for an attacker. Only enable JS when needed, allow-list the origins/URLs you load, never load attacker-controllable URLs into a channel-enabled WebView. → **High** (untrusted content) / **Medium**.
+Rule: a channel added with `addJavaScriptChannel` — or a legacy `addJavascriptInterface` — reachable from untrusted page content is a native bridge for an attacker. Only enable JS when needed, allow-list the origins/URLs you load, never load attacker-controllable URLs into a channel-enabled WebView. → **High** (untrusted content) / **Medium**.
 
 Note the iOS side is the same finding: `webview_flutter` is `WKWebView` there, and `addJavaScriptChannel` becomes a `WKScriptMessageHandler` callable via `window.webkit.messageHandlers.<name>.postMessage(...)`. One Dart line, two native bridges.
 
