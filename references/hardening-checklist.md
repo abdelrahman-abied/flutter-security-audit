@@ -333,7 +333,7 @@ Rule: the native counterpart to **5.3**, which only sees the Dart `flutter_secur
 | COD-SQLI | High | CODE | CWE-89 |
 | AUTH-JWT | Medium† | AUTH | CWE-347 |
 | AUTH-BIOMETRIC | Medium† | AUTH | CWE-287 |
-| RES-BACKEND | Critical† | RESILIENCE | CWE-639 |
+| RES-BACKEND | Critical‡ | RESILIENCE | CWE-639 |
 | RES-NO-ATTEST | High* | RESILIENCE | CWE-353 |
 | RES-CLIENT-ENT | Medium† | RESILIENCE | CWE-602 |
 | RES-NO-RASP | Medium* | RESILIENCE | CWE-919 |
@@ -342,6 +342,7 @@ Rule: the native counterpart to **5.3**, which only sees the Dart `flutter_secur
 
 \* = absence-check (a *missing* control); context-dependent, does not fail the CI gate on its own.
 † = heuristic pattern; the scanner emits this **candidate** severity (Medium, won't fail the gate), but the *confirmed* severity is often **High** per the checklist prose — escalate when you verify it's a real sole-gate / client-side-decision.
+‡ = **not detectable by any static scan** — `scan.sh` never emits it. It is a manual review item (backend security rules, server-side authz, IDOR). Absence from the scanner output means nothing; you must check it by hand. See 8.8.
 
 ---
 
