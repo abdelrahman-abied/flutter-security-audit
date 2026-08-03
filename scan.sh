@@ -25,7 +25,9 @@ BASELINE="$ROOT/.audit-baseline"
 TSV="$(mktemp)"
 trap 'rm -f "$TSV"' EXIT
 
-GBASE="-rHnEI --exclude-dir=build --exclude-dir=.dart_tool --exclude-dir=.git --exclude-dir=Pods"
+# security-audit-*.md is the skill's own report: it quotes evidence and names
+# missing controls, so it must never fire a check nor satisfy an absence-check.
+GBASE="-rHnEI --exclude-dir=build --exclude-dir=.dart_tool --exclude-dir=.git --exclude-dir=Pods --exclude=security-audit-*.md"
 TAB="$(printf '\t')"
 
 rank_of() { case "$1" in CRITICAL) echo 0;; HIGH) echo 1;; MEDIUM) echo 2;; LOW) echo 3;; *) echo 4;; esac; }

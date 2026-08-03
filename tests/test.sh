@@ -303,6 +303,42 @@ else
   bad "WEB-JS-CHANNEL missed the current webview_flutter spelling"
 fi
 
+# The skill writes its report (security-audit-<date>.md) into the audited repo,
+# and that report quotes vulnerable evidence AND names the missing controls. It
+# must be invisible to the scanner in both directions: quoted evidence must not
+# fire a check on a clean app, and named controls must not silence an
+# absence-check on a vulnerable one.
+report='# Flutter Security Audit — example
+
+- Evidence: `client.badCertificateCallback = (cert, host, port) => true;`
+- Evidence: `final token = Random();` and `print(password)`
+- Fix: use flutter_secure_storage, set FLAG_SECURE, add
+  filterTouchesWhenObscured, adopt play_integrity attestation, enable
+  ssl_pinning, add applinks: and jailbreak detection.'
+
+# Root is the documented location; lib/ is the worst-case user-chosen one —
+# only the --exclude in GBASE keeps the lib/ copy out of every check's path.
+cp -R "$WORK/clean" "$WORK/reported"
+printf '%s\n' "$report" > "$WORK/reported/security-audit-2026-01-01.md"
+printf '%s\n' "$report" > "$WORK/reported/lib/security-audit-2026-01-01.md"
+rep_out="$("$SCAN" "$WORK/reported")"
+rep_n="$(printf '%s\n' "$rep_out" | awk '/^\[/ {c++} END {print c + 0}')"
+if [ "$rep_n" -eq 0 ]; then
+  ok "an audit report in the repo fires no check (quoted evidence ignored)"
+else
+  bad "the skill's own report produced $rep_n finding(s)" "$rep_out"
+fi
+
+cp -R "$WORK/vulnerable" "$WORK/vulnreported"
+printf '%s\n' "$report" > "$WORK/vulnreported/security-audit-2026-01-01.md"
+printf '%s\n' "$report" > "$WORK/vulnreported/lib/security-audit-2026-01-01.md"
+ids_of "$WORK/vulnreported" > "$WORK/vulnreported.txt"
+if diff -u "$WORK/actual.txt" "$WORK/vulnreported.txt" > "$WORK/d8.txt" 2>&1; then
+  ok "an audit report in the repo silences no absence-check"
+else
+  bad "the report's named controls changed the findings" "$(cat "$WORK/d8.txt")"
+fi
+
 # ---------------------------------------------------------------------------
 printf '\n%s\n' "-------------------------------------------------"
 printf 'passed %d, failed %d\n' "$PASS" "$FAIL"

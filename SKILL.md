@@ -52,6 +52,8 @@ For findings you want to *prove*, hand the user the exact commands from **`refer
 ### Phase 5 — Report
 Produce the findings report using **`references/report-format.md`**: a headline **posture grade (A–F)**, an executive summary with a **MASVS coverage** table, a severity-ranked findings table, then one detailed block per finding (Severity · **MASVS · CWE** · Layer · Location · Evidence · Impact · Fix · Verify). Rank by the severity rubric below, grade to the app's risk tier, and end with the prioritized remediation order. Baseline accepted findings so re-runs stay quiet.
 
+**Write the report to a file, not just chat.** Save the full report as `security-audit-<YYYY-MM-DD>.md` at the root of the audited repo (or wherever the user asks). If a report file already exists from a previous run, ask before overwriting it. Then reply in chat with only the short version — posture grade, Critical/High counts, the single most important fix — and the path to the file.
+
 ## Severity rubric
 
 Rate by **impact × exploitability**, not by how easy it is to fix.
@@ -65,6 +67,7 @@ Always state **why** a finding got its severity, and note when a Medium becomes 
 
 ## Output discipline
 
+- The full report is a **markdown file** (`security-audit-<YYYY-MM-DD>.md` in the audited repo); the chat message is the executive summary plus the file path.
 - Every finding cites **file:line**, shows the offending snippet as **evidence**, and is tagged with its **MASVS group + CWE**.
 - Give the report a headline **posture grade (A–F)**, graded to the app's risk tier.
 - Every finding has a **specific, code-level fix** — not "add pinning" but *how*, with the API.

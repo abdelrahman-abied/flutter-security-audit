@@ -2,8 +2,9 @@
 
 An [Agent Skill](https://agentskills.io) that audits a Flutter/Dart
 mobile app for security, hardening and privacy gaps, then produces a
-severity-ranked report where **every finding carries a concrete fix and an
-attack-based way to verify it**. Works with any agent that reads the open
+severity-ranked report — written to `security-audit-<date>.md` in the audited
+repo — where **every finding carries a concrete fix and an attack-based way to
+verify it**. Works with any agent that reads the open
 `SKILL.md` standard — Claude Code, Cursor, Google Antigravity, Codex CLI,
 Gemini CLI and others — and degrades gracefully to a plain bash scanner
 everywhere else.

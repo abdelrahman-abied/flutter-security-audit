@@ -2,6 +2,15 @@
 
 Produce the report in this structure. Keep it skimmable at the top (summary + table) and detailed below (one block per finding).
 
+## Deliverable — a file, not a chat message
+
+Write the finished report to **`security-audit-<YYYY-MM-DD>.md`** at the root of the audited repo (or where the user asks). Keep the `security-audit-` prefix even if the user picks another location — `scan.sh` excludes that filename pattern, so the report's own evidence snippets never show up as findings on the next run. If a report from an earlier run exists, ask before overwriting. In chat, give only the executive summary — grade, severity counts, top remediation — and the file path.
+
+Two cautions for the file:
+
+- **Never paste secret values into it.** Cite them as *a hardcoded credential at `file:line`* — the report may be committed, attached to a ticket, or shared.
+- **The report itself is sensitive** — it is a map of the app's weaknesses. Suggest the user keep it out of public repos (`.gitignore` it or store it alongside other security docs).
+
 ---
 
 ## Template
