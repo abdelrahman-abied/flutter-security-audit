@@ -26,10 +26,15 @@ Two cautions for the file:
 
 | Severity | Count |   | MASVS group | Status |
 |---|---|---|---|---|
-| 🔴 Critical | N |   | STORAGE | ✅ / ⚠️ / ❌ |
+| 🔴 Critical | N |   | STORAGE | ✅ / ⚠️ / ❌ / ⬜ |
 | 🟠 High | N |   | CRYPTO | … |
 | 🟡 Medium | N |   | AUTH | … |
 | ⚪ Low | N |   | NETWORK · PLATFORM · CODE · RESILIENCE · PRIVACY | … |
+
+> **⬜ Not assessed:** <what was not checked, and the one command that closes it —
+> e.g. *dependency CVEs (L7): OSV-Scanner is not installed. Run
+> `brew install osv-scanner && osv-scanner --lockfile=pubspec.lock` and re-run
+> the audit.*>   Drop this block entirely when every phase ran.
 
 ## Findings
 
@@ -97,8 +102,11 @@ Assign a single headline grade for the executive summary:
 
 State the grade with a one-line justification. Grade to the app's **risk tier** — a missing-pinning "High" on a banking app is worse than on a content app.
 
+**Grade only what you assessed.** An **A** asserts every applicable layer came back clean, so it requires that every applicable layer was actually *checked* — a ⬜ not-assessed group caps the grade at **B**, with the reason stated in the justification ("B — clean on all eight static layers; dependency CVEs not scanned"). Grades below B are already driven by confirmed findings, so an unrun check never improves them.
+
 ## MASVS coverage & baseline
-- Fill the **MASVS group status** column (✅ covered / ⚠️ partial / ❌ missing) so the reader sees coverage at a glance across the 8 groups.
+- Fill the **MASVS group status** column (✅ covered / ⚠️ partial / ❌ missing / ⬜ not assessed) so the reader sees coverage at a glance across the 8 groups.
+- **⬜ not assessed is not ❌ missing.** ❌ is a finding about the *app* — the control is absent. ⬜ is a gap in the *audit* — nobody looked, usually because an optional tool (OSV-Scanner, a device for Phase 4) wasn't available. Collapsing the two lies in both directions: it invents a finding the app doesn't have, or it lets an unrun check read as a pass. Whenever a group is ⬜, name the exact command that closes it in the **Not assessed** line so the user can finish the job without you.
 - **Baseline:** accepted findings (e.g., an intentionally-exported launcher, a demo stub) go in a `.audit-baseline` file (one `file:line` substring per line) so `scan.sh` suppresses them on re-runs and the report doesn't cry wolf. Note in the report which findings were baselined and why.
 
 ## CI integration

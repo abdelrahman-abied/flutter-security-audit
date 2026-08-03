@@ -91,12 +91,24 @@ Note that placeholders bind **values, not identifiers** — a dynamic `ORDER BY 
 There is **no `dart pub audit`**. Use Google's OSV-Scanner over the lockfile (whole transitive tree):
 
 ```bash
-# Install: https://google.github.io/osv-scanner/
+command -v osv-scanner || brew install osv-scanner   # or https://google.github.io/osv-scanner/
 osv-scanner --lockfile=pubspec.lock
+
+# Native deps a pub-only scan misses:
+osv-scanner --lockfile=ios/Podfile.lock
+osv-scanner ./android                                 # picks up Gradle files
+
 # CI: uses: google/osv-scanner-action@v2  (fails the job on a known vuln)
 
 dart pub outdated    # staleness only — NOT vulnerabilities
 ```
+
+This is the only tool the audit *itself* needs: `scan.sh` and the eight-layer
+checklist run on bash/grep/awk alone, and every other section of this playbook is
+optional proof you run against your own build. If OSV-Scanner isn't installed the
+audit still completes — mark the dependency layer **⬜ not assessed** in the report
+and carry the install line into the remediation list. What you must not do is
+report zero dependency vulnerabilities from a scan that never ran.
 
 ---
 

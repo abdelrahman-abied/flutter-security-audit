@@ -265,16 +265,47 @@ present_check LOW      COD-DEBUG-PRINT MASVS-CODE CWE-489 - '[^a-zA-Z.]print\(' 
 present_check LOW      COD-DEPRECATED  MASVS-CODE CWE-477 - 'withOpacity\(' "$L"
 
 # ---- Output ----
-if [ "$FORMAT" = "json" ] && command -v python3 >/dev/null 2>&1; then
-  python3 - "$TSV" <<'PY'
-import sys, json
-rows=[]
-for line in open(sys.argv[1]):
-    p=line.rstrip("\n").split("\t")
-    if len(p)<7: continue
-    rows.append({"severity":p[1],"id":p[2],"masvs":p[3],"cwe":p[4],"location":p[5],"evidence":p[6]})
-print(json.dumps({"tool":"flutter-security-audit","findings":rows,"count":len(rows)}, indent=2))
-PY
+if [ "$FORMAT" = "json" ]; then
+  # awk, not python3. --json is the CI path, and it is the one place a missing
+  # interpreter used to degrade silently: the old python3 guard fell through to
+  # the human branch, so a pipeline that asked for JSON got prose and failed at
+  # its parser instead of here. awk is already required by the exit gate and the
+  # comment filter, so emitting JSON from it keeps the scanner's dependency set
+  # at bash + grep + awk with nothing to install.
+  #
+  # Escaping is small by construction: grep is line-based (no newlines) and
+  # record() already flattened tabs, so only " and \ and stray control bytes can
+  # appear. Iteration is byte-wise, which is what makes it safe on both gawk and
+  # BSD awk — every UTF-8 continuation byte is >= 0x80, matches no ESC key, and
+  # passes through untouched. Sorted like the human output so the two agree.
+  sort -t "$TAB" -k1,1n "$TSV" | awk -F"$TAB" '
+    BEGIN {
+      for (i = 1; i < 32; i++) ESC[sprintf("%c", i)] = sprintf("\\u%04x", i)
+      ESC["\""] = "\\\""
+      ESC["\\"] = "\\\\"
+    }
+    function esc(s,   out, k, len, c) {
+      out = ""; len = length(s)
+      for (k = 1; k <= len; k++) {
+        c = substr(s, k, 1)
+        out = out (c in ESC ? ESC[c] : c)
+      }
+      return out
+    }
+    NF >= 7 {
+      rows[++n] = sprintf("    { \"severity\": \"%s\", \"id\": \"%s\", \"masvs\": \"%s\", \"cwe\": \"%s\", \"location\": \"%s\", \"evidence\": \"%s\" }", \
+                          esc($2), esc($3), esc($4), esc($5), esc($6), esc($7))
+    }
+    END {
+      print "{"
+      print "  \"tool\": \"flutter-security-audit\","
+      print "  \"findings\": ["
+      for (k = 1; k <= n; k++) print rows[k] (k < n ? "," : "")
+      print "  ],"
+      printf "  \"count\": %d\n", n + 0
+      print "}"
+    }
+  '
 else
   n=$(wc -l < "$TSV" | tr -d ' ')
   echo "flutter-security-audit — $n candidate finding(s) in $ROOT"

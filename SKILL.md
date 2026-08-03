@@ -44,7 +44,12 @@ It tags each hit with **MASVS + CWE**, honors a `.audit-baseline` (accepted find
 Do the fast, high-signal scans first (hardcoded secrets, accept-all-cert, missing obfuscation) — these are usually the Critical findings.
 
 ### Phase 3 — Dependency scan
-Run **OSV-Scanner** on `pubspec.lock` (there is **no `dart pub audit`** command). See the attack playbook. Also check for native deps (Gradle/CocoaPods) that a pub-only scan misses.
+Run **OSV-Scanner** on `pubspec.lock` (there is **no `dart pub audit`** command). See the attack playbook. It is the only tool the audit itself needs installed — Phase 4's are optional and user-run — so check for it first with `command -v osv-scanner`:
+
+- **Present** → scan `pubspec.lock`, then `ios/Podfile.lock` and the Gradle files for the native deps a pub-only scan misses.
+- **Absent** → **do not block the audit and do not ask twice.** Every other phase needs nothing installed, so finish them all, then carry the gap into the report: mark the dependency layer **⬜ not assessed** in the MASVS coverage table and put the install command in the remediation list so the user can close it themselves whenever they want.
+
+**An unrun scan is not a clean scan.** Never report "no vulnerable dependencies" on the strength of a scan that did not happen, and never let `dart pub outdated` stand in for one — it measures staleness, not vulnerabilities.
 
 ### Phase 4 — Dynamic / attack verification (optional but powerful)
 For findings you want to *prove*, hand the user the exact commands from **`references/attack-playbook.md`**: decompile with `blutter` to show recovered strings, unpin TLS with a Frida script and intercept in Burp, etc. Frame each as "run this against your own build to confirm the finding is real."
