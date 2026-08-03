@@ -1,9 +1,12 @@
 # flutter-security-audit
 
-A [Claude Code](https://claude.com/claude-code) skill that audits a Flutter/Dart
+An [Agent Skill](https://agentskills.io) that audits a Flutter/Dart
 mobile app for security, hardening and privacy gaps, then produces a
 severity-ranked report where **every finding carries a concrete fix and an
-attack-based way to verify it**.
+attack-based way to verify it**. Works with any agent that reads the open
+`SKILL.md` standard — Claude Code, Cursor, Google Antigravity, Codex CLI,
+Gemini CLI and others — and degrades gracefully to a plain bash scanner
+everywhere else.
 
 Ships with `scan.sh` — a dependency-free static scanner that bundles all the
 checklist patterns into one pass, tags each hit with **OWASP MASVS + CWE**, and
@@ -13,21 +16,48 @@ exits non-zero on confirmed Critical/High so it works as a CI gate.
 
 ## Install
 
-Clone into your Claude Code skills directory:
+`SKILL.md` follows the open [Agent Skills](https://agentskills.io) standard, so
+the same clone works in every agent that supports it — only the destination
+directory differs:
+
+| Agent | Per-project | Global (every project) |
+|---|---|---|
+| **Claude Code** | `.claude/skills/` | `~/.claude/skills/` |
+| **Cursor** | `.cursor/skills/` | `~/.cursor/skills/` |
+| **Google Antigravity** | `.agents/skills/` | — |
 
 ```bash
-# Global (available in every project)
+# Example: Claude Code, globally
 git clone https://github.com/abdelrahman-abied/flutter-security-audit \
   ~/.claude/skills/flutter-security-audit
 
-# …or per-project
+# Example: Cursor, per-project
 git clone https://github.com/abdelrahman-abied/flutter-security-audit \
-  .claude/skills/flutter-security-audit
+  .cursor/skills/flutter-security-audit
 ```
 
-Then just ask Claude to audit an app — the skill activates on requests like
+Then just ask the agent to audit an app — the skill activates on requests like
 *"security-review this Flutter app"*, *"check my pinning setup"*, or
 *"threat-model this before release"*.
+
+Two portability notes:
+
+- **Activation differs by agent.** Claude Code and Antigravity trigger the
+  skill automatically when a request matches its `description`; some tools
+  only load a skill when you name it. If nothing happens, ask explicitly:
+  *"use the flutter-security-audit skill"*.
+- **`scan.sh` needs bash.** Native on macOS/Linux; on Windows run it through
+  Git Bash or WSL. The rest of the skill is plain Markdown and works anywhere.
+
+**Any other agent** (no skills support): clone anywhere, then point the agent at
+it from your project's `AGENTS.md` (or equivalent context file):
+
+```markdown
+When asked to security-audit, harden or pentest this Flutter app, read
+tools/flutter-security-audit/SKILL.md and follow its workflow.
+```
+
+Worst case, with no agent at all, `scan.sh` still runs standalone — see below.
 
 ## Use the scanner on its own
 
@@ -115,7 +145,7 @@ platform-specific, both sides are covered:
 
 | File | Purpose |
 |---|---|
-| `SKILL.md` | Entry point — layers, severity rubric, workflow |
+| `SKILL.md` | Entry point ([Agent Skills](https://agentskills.io) standard) — layers, severity rubric, workflow |
 | `scan.sh` | The scanner (36 checks, baseline, JSON, CI exit code) |
 | `references/hardening-checklist.md` | Per-check pattern, rule, severity + the ID→MASVS/CWE table |
 | `references/attack-playbook.md` | Verification steps with blutter / Frida / Burp / OSV-Scanner |

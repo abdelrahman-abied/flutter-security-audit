@@ -23,10 +23,10 @@ Work through these phases. Announce the phase, do the work, then move on. Load t
 2. Map the project: locate `pubspec.yaml`/`pubspec.lock`, `android/app/build.gradle(.kts)`, `android/app/src/main/AndroidManifest.xml`, `MainActivity.kt`, iOS `Info.plist` and `Runner/*.entitlements`, network/Dio setup, storage code, and any CI config (`.github/workflows`, `codemagic.yaml`, `fastlane`).
 
 ### Phase 2 — Static audit (the core pass)
-**Start with the bundled scanner** to sweep every pattern in one pass, then triage:
+**Start with the bundled scanner** to sweep every pattern in one pass, then triage (`<skill-dir>` is the directory containing this SKILL.md — wherever your agent installed the skill):
 ```
-bash ~/.claude/skills/flutter-security-audit/scan.sh <repo>            # human output, exits 1 on confirmed Critical/High
-bash ~/.claude/skills/flutter-security-audit/scan.sh <repo> --json     # machine-readable (CI / GitHub code scanning)
+bash <skill-dir>/scan.sh <repo>            # human output, exits 1 on confirmed Critical/High
+bash <skill-dir>/scan.sh <repo> --json     # machine-readable (CI / GitHub code scanning)
 ```
 It tags each hit with **MASVS + CWE**, honors a `.audit-baseline` (accepted findings), and runs absence-checks for missing controls. Matches inside comments are dropped — a line that only *talks* about `Random()` is not a finding, and a control that exists only in a commented-out line does not satisfy an absence-check — but string literals still count as code, so expect an occasional sentence about a secret to be reported alongside real ones. Then work the checklist in **`references/hardening-checklist.md`** — eight layers, each with the pattern, rule, and severity — to confirm candidates and catch what patterns can't (logic, context). The eight layers:
 
